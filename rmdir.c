@@ -33,7 +33,10 @@ int rmdir_ex(const char *name) {
         result = rmdir(name);
     }
 
-    close(fd);
+    /*if (close(fd) < 0) {
+        perror("rmdir_ex.close()");
+    }*/
+
     return result;
 }
 
@@ -68,13 +71,7 @@ int _rmdir_ex(int dirfd) {
         result = fstat(fd, &buf);
 
         if (result == 0) {
-            if (S_ISREG(buf.st_mode)) {
-                result = unlinkat(dirfd, dirent->d_name, 0);
-
-                if (result < 0) {
-                    perror("unlinkat(file)");
-                }
-            } else if (S_ISDIR(buf.st_mode)) {
+            if (S_ISDIR(buf.st_mode)) {
                 result = _rmdir_ex(fd);
 
                 if (result == 0) {
@@ -85,12 +82,22 @@ int _rmdir_ex(int dirfd) {
                     }
                 }
             } else {
-                fprintf(stderr, "Entry '%s' is neither file nor directory.\n", dirent->d_name);
-                result = -1;
+                if (close(fd) < 0) {
+                    perror("_rmdir_ex.close()");
+                }
+
+                if (S_ISREG(buf.st_mode)) {
+                    result = unlinkat(dirfd, dirent->d_name, 0);
+
+                    if (result < 0) {
+                        perror("unlinkat(file)");
+                    }
+                } else {
+                    fprintf(stderr, "Entry '%s' is neither file nor directory.\n", dirent->d_name);
+                    result = -1;
+                }
             }
         }
-
-        close(fd);
     }
 
     closedir(dir);
