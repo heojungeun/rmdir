@@ -5,9 +5,10 @@
 #include <fcntl.h>
 #include <dirent.h>
 #include <unistd.h>
+#include <errno.h>
+#include <limits.h>
 
 static int rmdir_ex(const char *name);
-static int _rmdir_ex(int dirfd);
 
 int main(int argc, char **argv) {
     if (argc < 2) {
@@ -15,90 +16,63 @@ int main(int argc, char **argv) {
         return EXIT_FAILURE;
     }
 
-    return rmdir_ex(argv[1]) == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+    if (rmdir_ex(argv[1]) == 0) {
+        return EXIT_SUCCESS;
+    } else {
+        perror("rmdir_ex");
+        return EXIT_FAILURE;
+    }
 }
 
 int rmdir_ex(const char *name) {
-    int result;
-    int fd = open(name, O_RDONLY | O_DIRECTORY);
-
-    if (fd < 0) {
-        perror("open()");
-        return -1;
-    }
-
-    result = _rmdir_ex(fd);
-
-    if (result == 0) {
-        result = rmdir(name);
-    }
-
-    /*if (close(fd) < 0) {
-        perror("rmdir_ex.close()");
-    }*/
-
-    return result;
-}
-
-int _rmdir_ex(int dirfd) {
-    int result = 0;
-    int fd;
-    struct stat buf;
+    DIR *dir;
     struct dirent *dirent;
-    DIR *dir = fdopendir(dirfd);
+    char path[PATH_MAX];
 
-    if (!dir) {
-        perror("fdopendir()");
-        return -1;
-    }
+    if (rmdir(name) < 0) {
+        switch (errno) {
+        case ENOTDIR:
+            return unlink(name);
+        case ENOTEMPTY:
+            // Erase content
 
-    while (dirent = readdir(dir), dirent && result == 0) {
+            dir = opendir(name);
 
-        // If d_name == "." or d_name == "..", skip
+            if (!dir) {
+                return -1;
+            }
 
-        if (dirent->d_name[0] == '.' && (dirent->d_name[1] == '\0' || (dirent->d_name[1] == '.' && dirent->d_name[2] == '\0'))) {
-            continue;
-        }
-
-        fd = openat(dirfd, dirent->d_name, O_RDONLY);
-
-        if (fd < 0) {
-            perror("openat()");
-            result = -1;
-            break;
-        }
-
-        result = fstat(fd, &buf);
-
-        if (result == 0) {
-            if (S_ISDIR(buf.st_mode)) {
-                result = _rmdir_ex(fd);
-
-                if (result == 0) {
-                    result = unlinkat(dirfd, dirent->d_name, AT_REMOVEDIR);
-
-                    if (result < 0) {
-                        perror("unlinkat(dir)");
-                    }
-                }
-            } else {
-                if (close(fd) < 0) {
-                    perror("_rmdir_ex.close()");
+            while (dirent = readdir(dir), dirent) {
+                // Skip "." and ".."
+                if (dirent->d_name[0] == '.' && (dirent->d_name[1] == '\0' || (dirent->d_name[1] == '.' && dirent->d_name[2] == '\0'))) {
+                    continue;
                 }
 
-                if (S_ISREG(buf.st_mode)) {
-                    result = unlinkat(dirfd, dirent->d_name, 0);
+                if (snprintf(path, PATH_MAX, "%s/%s", name, dirent->d_name) >= PATH_MAX) {
+                    closedir(dir);
+                    return -1;
+                }
 
-                    if (result < 0) {
-                        perror("unlinkat(file)");
-                    }
-                } else {
-                    fprintf(stderr, "Entry '%s' is neither file nor directory.\n", dirent->d_name);
-                    result = -1;
+                if (rmdir_ex(path) < 0) {
+                    closedir(dir);
+                    return -1;
                 }
             }
+
+            closedir(dir);
+
+            // Try to erase again
+
+            if (rmdir(name) < 0) {
+                return -1;
+            }
+
+            break;
+
+        default:
+            return -1;
         }
     }
 
-    closedir(dir);
+    return 0;
 }
