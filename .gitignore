@@ -32,4 +32,10 @@
 *.dSYM/
 *.su
 
+coverity_tool.tgz
+cov-analysis-linux64-*
+cov-int
+rmdir.tgz
+
 rmdir
+pexp
